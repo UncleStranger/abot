@@ -1,5 +1,4 @@
 ﻿using Abot.Core;
-using Abot.Core;
 using Abot.Crawler;
 using Abot.Poco;
 using Abot.Util;
@@ -17,7 +16,7 @@ namespace Abot.Tests.Unit.Crawler
     [TestFixture]
     public class WebCrawlerTest
     {
-        WebCrawler _unitUnderTest;
+        IPoliteWebCrawler _unitUnderTest;
         Mock<IPageRequester> _fakeHttpRequester;
         Mock<IHyperLinkParser> _fakeHyperLinkParser;
         Mock<ICrawlDecisionMaker> _fakeCrawlDecisionMaker;
@@ -107,10 +106,9 @@ namespace Abot.Tests.Unit.Crawler
 
 
         [Test]
-        [ExpectedException(typeof(ArgumentNullException))]
-        public void Crawl_NullUri()
+        public void Crawl_NullUri_ThrowsException()
         {
-            _unitUnderTest.Crawl(null);
+            Assert.Throws<ArgumentNullException>(() => _unitUnderTest.Crawl(null));
         }
 
         [Test]
@@ -459,6 +457,23 @@ namespace Abot.Tests.Unit.Crawler
         #endregion
 
         #region Async Event Tests
+
+        [Test]
+        public void Crawl_ShouldFire_RobotsTxtParseCompletedAsync()
+        {
+            _dummyConfiguration.IsRespectRobotsDotTextEnabled = true;
+            _fakeHttpRequester.Setup(f => f.MakeRequest(It.IsAny<Uri>(), It.IsAny<Func<CrawledPage, CrawlDecision>>())).Returns(new CrawledPage(_rootUri));
+            _fakeHyperLinkParser.Setup(f => f.GetLinks(It.IsAny<CrawledPage>())).Returns(new List<Uri>());
+            _fakeRobotsDotTextFinder.Setup(f => f.Find(It.IsAny<Uri>())).Returns(new RobotsDotText(_rootUri, string.Empty));
+
+            int _pageRobotsTxtCompleted = 0;
+
+            _unitUnderTest.RobotsDotTextParseCompletedAsync += (s, e) => ++_pageRobotsTxtCompleted;
+
+            _unitUnderTest.Crawl(_rootUri);
+            System.Threading.Thread.Sleep(100);
+            Assert.AreEqual(1, _pageRobotsTxtCompleted);
+        }
 
         [Test]
         public void Crawl_CrawlDecisionMakerMethodsReturnTrue_PageCrawlStartingAndCompletedAsyncEventsFires()
@@ -833,6 +848,23 @@ namespace Abot.Tests.Unit.Crawler
         }
 
         [Test]
+        public void Crawl_ShouldFire_RobotsTxtParseCompleted()
+        {
+            _dummyConfiguration.IsRespectRobotsDotTextEnabled = true;
+            _fakeHttpRequester.Setup(f => f.MakeRequest(It.IsAny<Uri>(), It.IsAny<Func<CrawledPage, CrawlDecision>>())).Returns(new CrawledPage(_rootUri));
+            _fakeHyperLinkParser.Setup(f => f.GetLinks(It.IsAny<CrawledPage>())).Returns(new List<Uri>());
+            _fakeRobotsDotTextFinder.Setup(f => f.Find(It.IsAny<Uri>())).Returns(new RobotsDotText(_rootUri, string.Empty));
+
+            int _pageRobotsTxtCompleted = 0;
+
+            _unitUnderTest.RobotsDotTextParseCompleted += (s, e) => ++_pageRobotsTxtCompleted;
+
+            _unitUnderTest.Crawl(_rootUri);
+
+            Assert.AreEqual(1, _pageRobotsTxtCompleted);
+        }
+
+        [Test]
         public void Crawl_ShouldCrawlLinksDelegateReturnsFalse_PageLinksNotCrawled()
         {
             _fakeHttpRequester.Setup(f => f.MakeRequest(It.IsAny<Uri>(), It.IsAny<Func<CrawledPage, CrawlDecision>>())).Returns(new CrawledPage(_rootUri));
@@ -1089,6 +1121,35 @@ namespace Abot.Tests.Unit.Crawler
             Assert.AreEqual("Process is using [2mb] of memory which is above the max configured of [1mb] for site [http://a.com/]. This is configurable through the maxMemoryUsageInMb in app.conf or CrawlConfiguration.MaxMemoryUsageInMb.", result.ErrorException.Message);
             Assert.IsFalse(result.CrawlContext.IsCrawlStopRequested);
             Assert.IsTrue(result.CrawlContext.IsCrawlHardStopRequested);
+        }
+
+        [Test]
+        public void Crawl_ExtractedLinksAreNotCheckedTwice()
+        {
+            Uri fakeLink1 = new Uri("http://a.com/someUri");
+            Uri fakeLink2 = new Uri("http://a.com/someOtherUri");
+            Uri fakeLink3 = new Uri("http://a.com/anotherOne");
+            CrawledPage homePage = new CrawledPage(_rootUri);
+            CrawledPage page1 = new CrawledPage(fakeLink1);
+            CrawledPage page2 = new CrawledPage(fakeLink2);
+
+            // All links are found in each pages.
+            _fakeHyperLinkParser.Setup(parser => parser.GetLinks(It.IsAny<CrawledPage>())).Returns(new [] { fakeLink1, fakeLink2, fakeLink3 });
+            
+            _fakeHttpRequester.Setup(f => f.MakeRequest(_rootUri, It.IsAny<Func<CrawledPage, CrawlDecision>>())).Returns(homePage);
+            _fakeHttpRequester.Setup(f => f.MakeRequest(fakeLink1, It.IsAny<Func<CrawledPage, CrawlDecision>>())).Returns(page1);
+            _fakeHttpRequester.Setup(f => f.MakeRequest(fakeLink2, It.IsAny<Func<CrawledPage, CrawlDecision>>())).Returns(page2);
+            _fakeCrawlDecisionMaker.Setup(f => f.ShouldCrawlPage(It.IsAny<PageToCrawl>(), It.IsAny<CrawlContext>())).Returns(new CrawlDecision{Allow = true});
+            _fakeCrawlDecisionMaker.Setup(f => f.ShouldCrawlPage(It.Is<PageToCrawl>(p => p.Uri == fakeLink3), It.IsAny<CrawlContext>())).Returns(new CrawlDecision{Allow = false});
+            _fakeCrawlDecisionMaker.Setup(f => f.ShouldCrawlPageLinks(It.IsAny<CrawledPage>(), It.IsAny<CrawlContext>())).Returns(new CrawlDecision { Allow = true });
+
+            _unitUnderTest = new PoliteWebCrawler(_dummyConfiguration, _fakeCrawlDecisionMaker.Object, _dummyThreadManager, _dummyScheduler, _fakeHttpRequester.Object, _fakeHyperLinkParser.Object, _fakeMemoryManager.Object, _fakeDomainRateLimiter.Object, _fakeRobotsDotTextFinder.Object);
+            _unitUnderTest.Crawl(_rootUri);
+
+            // The links should be checked only one time, so ShouldCrawlPage should be called only 4 times.
+            _fakeCrawlDecisionMaker.Verify(f => f.ShouldCrawlPage(It.IsAny<PageToCrawl>(), It.IsAny<CrawlContext>()), Times.Exactly(4));
+            _fakeHyperLinkParser.VerifyAll();
+            _fakeCrawlDecisionMaker.VerifyAll();
         }
 
         [Test]

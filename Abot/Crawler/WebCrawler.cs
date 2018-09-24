@@ -4,12 +4,10 @@ using System.Diagnostics;
 using System.Dynamic;
 using System.Reflection;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Timers;
 using Abot.Core;
 using Abot.Poco;
 using Abot.Util;
-using AutoMapper;
 using log4net;
 using Timer = System.Timers.Timer;
 
@@ -113,6 +111,7 @@ namespace Abot.Crawler
         protected bool _crawlComplete = false;
         protected bool _crawlStopReported = false;
         protected bool _crawlCancellationReported = false;
+        protected bool _maxPagesToCrawlLimitReachedOrScheduled = false;
         protected Timer _timeoutTimer;
         protected CrawlResult _crawlResult = null;
         protected CrawlContext _crawlContext;
@@ -128,6 +127,7 @@ namespace Abot.Crawler
         protected Func<CrawledPage, CrawlContext, CrawlDecision> _shouldRecrawlPageDecisionMaker;
         protected Func<Uri, CrawledPage, CrawlContext, bool> _shouldScheduleLinkDecisionMaker;
         protected Func<Uri, Uri, bool> _isInternalDecisionMaker = (uriInQuestion, rootUri) => uriInQuestion.Authority == rootUri.Authority;
+        
 
         /// <summary>
         /// Dynamic object that can hold any value that needs to be available in the crawl context
@@ -198,7 +198,7 @@ namespace Abot.Crawler
                 || _crawlContext.CrawlConfiguration.MinAvailableMemoryRequiredInMb > 0)
                 _memoryManager = memoryManager ?? new MemoryManager(new CachedMemoryMonitor(new GcMemoryMonitor(), _crawlContext.CrawlConfiguration.MaxMemoryUsageCacheTimeInSeconds));
 
-            _hyperLinkParser = hyperLinkParser ?? new HapHyperLinkParser(_crawlContext.CrawlConfiguration.IsRespectMetaRobotsNoFollowEnabled, _crawlContext.CrawlConfiguration.IsRespectAnchorRelNoFollowEnabled, null, _crawlContext.CrawlConfiguration.IsRespectUrlNamedAnchorOrHashbangEnabled);
+            _hyperLinkParser = hyperLinkParser ?? new HapHyperLinkParser(_crawlContext.CrawlConfiguration, null);
 
             _crawlContext.Scheduler = _scheduler;
         }
@@ -780,7 +780,7 @@ namespace Abot.Crawler
                 crawledPage.Content.Bytes.Length > _crawlContext.CrawlConfiguration.MaxPageSizeInBytes)
             {
                 isAboveMax = true;
-                _logger.DebugFormat("Page [{0}] has a page size of [{1}] bytes which is above the [{2}] byte max", crawledPage.Uri, crawledPage.Content.Bytes.Length, _crawlContext.CrawlConfiguration.MaxPageSizeInBytes);
+                _logger.InfoFormat("Page [{0}] has a page size of [{1}] bytes which is above the [{2}] byte max, no further processing will occur for this page", crawledPage.Uri, crawledPage.Content.Bytes.Length, _crawlContext.CrawlConfiguration.MaxPageSizeInBytes);
             }
             return isAboveMax;
         }
@@ -804,7 +804,18 @@ namespace Abot.Crawler
 
         protected virtual bool ShouldCrawlPage(PageToCrawl pageToCrawl)
         {
+            if (_maxPagesToCrawlLimitReachedOrScheduled)
+                return false;
+
             CrawlDecision shouldCrawlPageDecision = _crawlDecisionMaker.ShouldCrawlPage(pageToCrawl, _crawlContext);
+            if (!shouldCrawlPageDecision.Allow &&
+                shouldCrawlPageDecision.Reason.Contains("MaxPagesToCrawl limit of"))
+            {
+                _maxPagesToCrawlLimitReachedOrScheduled = true;
+                _logger.Info("MaxPagesToCrawlLimit has been reached or scheduled. No more pages will be scheduled.");
+                return false;
+            }
+
             if (shouldCrawlPageDecision.Allow)
                 shouldCrawlPageDecision = (_shouldCrawlPageDecisionMaker != null) ? _shouldCrawlPageDecisionMaker.Invoke(pageToCrawl, _crawlContext) : new CrawlDecision { Allow = true };
 
@@ -870,28 +881,41 @@ namespace Abot.Crawler
             
             pageToCrawl.LastRequest = DateTime.Now;
 
-            CrawledPage crawledPage = _pageRequester.MakeRequest(pageToCrawl.Uri, (x) => ShouldDownloadPageContentWrapper(x));
-            //CrawledPage crawledPage = await _pageRequester.MakeRequestAsync(pageToCrawl.Uri, (x) => ShouldDownloadPageContentWrapper(x));
+            CrawledPage crawledPage = _pageRequester.MakeRequest(pageToCrawl.Uri, ShouldDownloadPageContent);
+            //CrawledPage crawledPage = await _pageRequester.MakeRequestAsync(pageToCrawl.Uri, ShouldDownloadPageContent);
 
-            dynamic combinedPageBag = this.CombinePageBags(pageToCrawl.PageBag, crawledPage.PageBag);
-            Mapper.CreateMap<PageToCrawl, CrawledPage>();
-            Mapper.Map(pageToCrawl, crawledPage);
-            crawledPage.PageBag = combinedPageBag;
+            Map(pageToCrawl, crawledPage);
 
             if (crawledPage.HttpWebResponse == null)
-                _logger.InfoFormat("Page crawl complete, Status:[NA] Url:[{0}] Parent:[{1}] Retry:[{2}]", crawledPage.Uri.AbsoluteUri, crawledPage.ParentUri, crawledPage.RetryCount);
+                _logger.InfoFormat("Page crawl complete, Status:[NA] Url:[{0}] Elapsed:[{1}] Parent:[{2}] Retry:[{3}]", crawledPage.Uri.AbsoluteUri, crawledPage.Elapsed, crawledPage.ParentUri, crawledPage.RetryCount);
             else
-                _logger.InfoFormat("Page crawl complete, Status:[{0}] Url:[{1}] Parent:[{2}] Retry:[{3}]", Convert.ToInt32(crawledPage.HttpWebResponse.StatusCode), crawledPage.Uri.AbsoluteUri, crawledPage.ParentUri, crawledPage.RetryCount);
+                _logger.InfoFormat("Page crawl complete, Status:[{0}] Url:[{1}] Elapsed:[{2}] Parent:[{3}] Retry:[{4}]", Convert.ToInt32(crawledPage.HttpWebResponse.StatusCode), crawledPage.Uri.AbsoluteUri, crawledPage.Elapsed, crawledPage.ParentUri, crawledPage.RetryCount);
 
             return crawledPage;
         }
 
-        protected virtual dynamic CombinePageBags(dynamic pageToCrawlBag, dynamic crawledPageBag )
+        protected void Map(PageToCrawl src, CrawledPage dest)
+        {
+            dest.Uri = src.Uri;
+            dest.ParentUri = src.ParentUri;
+            dest.IsRetry = src.IsRetry;
+            dest.RetryAfter = src.RetryAfter;
+            dest.RetryCount = src.RetryCount;
+            dest.LastRequest = src.LastRequest;
+            dest.IsRoot = src.IsRoot;
+            dest.IsInternal = src.IsInternal;
+            dest.PageBag = CombinePageBags(src.PageBag, dest.PageBag);
+            dest.CrawlDepth = src.CrawlDepth;
+            dest.RedirectedFrom = src.RedirectedFrom;
+            dest.RedirectPosition = src.RedirectPosition;
+        }
+
+        protected virtual dynamic CombinePageBags(dynamic pageToCrawlBag, dynamic crawledPageBag)
         {
             IDictionary<string, object> combinedBag = new ExpandoObject();
             var pageToCrawlBagDict = pageToCrawlBag as IDictionary<string, object>;
             var crawledPageBagDict = crawledPageBag as IDictionary<string, object>;
-            
+
             foreach (KeyValuePair<string, object> entry in pageToCrawlBagDict) combinedBag[entry.Key] = entry.Value;
             foreach (KeyValuePair<string, object> entry in crawledPageBagDict) combinedBag[entry.Key] = entry.Value;
 
@@ -905,17 +929,10 @@ namespace Abot.Crawler
                 pageToCrawl.RetryCount++;
                 return;
             }
-                
 
             int domainCount = 0;
             Interlocked.Increment(ref _crawlContext.CrawledCount);
-            lock (_crawlContext.CrawlCountByDomain)
-            {
-                if (_crawlContext.CrawlCountByDomain.TryGetValue(pageToCrawl.Uri.Authority, out domainCount))
-                    _crawlContext.CrawlCountByDomain[pageToCrawl.Uri.Authority] = domainCount + 1;
-                else
-                    _crawlContext.CrawlCountByDomain.TryAdd(pageToCrawl.Uri.Authority, 1);
-            }
+            _crawlContext.CrawlCountByDomain.AddOrUpdate(pageToCrawl.Uri.Authority, 1, (key, oldValue) => oldValue + 1);
         }
 
         protected virtual void ParsePageLinks(CrawledPage crawledPage)
@@ -925,9 +942,13 @@ namespace Abot.Crawler
 
         protected virtual void SchedulePageLinks(CrawledPage crawledPage)
         {
+            int linksToCrawl = 0;
             foreach (Uri uri in crawledPage.ParsedLinks)
             {
-                if (_shouldScheduleLinkDecisionMaker == null || _shouldScheduleLinkDecisionMaker.Invoke(uri, crawledPage, _crawlContext))
+                // First validate that the link was not already visited or added to the list of pages to visit, so we don't
+                // make the same validation and fire the same events twice.
+                if (!_scheduler.IsUriKnown(uri) &&
+                    (_shouldScheduleLinkDecisionMaker == null || _shouldScheduleLinkDecisionMaker.Invoke(uri, crawledPage, _crawlContext)))
                 {
                     try //Added due to a bug in the Uri class related to this (http://stackoverflow.com/questions/2814951/system-uriformatexception-invalid-uri-the-hostname-could-not-be-parsed)
                     {
@@ -940,10 +961,20 @@ namespace Abot.Crawler
                         if (ShouldSchedulePageLink(page))
                         {
                             _scheduler.Add(page);
+                            linksToCrawl++;
+                        }
+
+                        if (!ShouldScheduleMorePageLink(linksToCrawl))
+                        {
+                            _logger.InfoFormat("MaxLinksPerPage has been reached. No more links will be scheduled for current page [{0}].", crawledPage.Uri);
+                            break;
                         }
                     }
                     catch { }
                 }
+
+                // Add this link to the list of known Urls so validations are not duplicated in the future.
+                _scheduler.AddKnownUri(uri);
             }
         }
 
@@ -955,7 +986,12 @@ namespace Abot.Crawler
             return false;   
         }
 
-        protected virtual CrawlDecision ShouldDownloadPageContentWrapper(CrawledPage crawledPage)
+        protected virtual bool ShouldScheduleMorePageLink(int linksAdded)
+        {
+            return _crawlContext.CrawlConfiguration.MaxLinksPerPage == 0 || _crawlContext.CrawlConfiguration.MaxLinksPerPage > linksAdded;
+        }
+
+        protected virtual CrawlDecision ShouldDownloadPageContent(CrawledPage crawledPage)
         {
             CrawlDecision decision = _crawlDecisionMaker.ShouldDownloadPageContent(crawledPage, _crawlContext);
             if (decision.Allow)
@@ -1043,11 +1079,9 @@ namespace Abot.Crawler
 
             if (IsRedirect(crawledRootPage)) {
                 _crawlContext.RootUri = ExtractRedirectUri(crawledRootPage);
-                _logger.InfoFormat("The root URI [{0}] was redirected to [{1}]. Pages from domains [{2}] and [{3}] will be considered internal.",
+                _logger.InfoFormat("The root URI [{0}] was redirected to [{1}]. [{1}] is the new root.",
                     _crawlContext.OriginalRootUri,
-                    _crawlContext.RootUri,
-                    _crawlContext.RootUri.Authority,
-                    _crawlContext.OriginalRootUri.Authority);
+                    _crawlContext.RootUri);
             }
         }
 

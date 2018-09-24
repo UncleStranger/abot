@@ -1,6 +1,7 @@
 ﻿using Abot.Poco;
 using System;
 using System.Configuration;
+using System.Runtime.Remoting.Channels;
 
 namespace Abot.Core
 {
@@ -39,20 +40,80 @@ namespace Abot.Core
 
         public CrawlConfiguration Convert()
         {
-            AutoMapper.Mapper.CreateMap<CrawlBehaviorElement, CrawlConfiguration>();
-            AutoMapper.Mapper.CreateMap<PolitenessElement, CrawlConfiguration>();
-            AutoMapper.Mapper.CreateMap<AuthorizationElement, CrawlConfiguration>();
-
-
             CrawlConfiguration config = new CrawlConfiguration();
-            AutoMapper.Mapper.Map<CrawlBehaviorElement, CrawlConfiguration>(CrawlBehavior, config);
-            AutoMapper.Mapper.Map<PolitenessElement, CrawlConfiguration>(Politeness, config);
-            AutoMapper.Mapper.Map<AuthorizationElement, CrawlConfiguration>(Authorization, config);
+            Map(CrawlBehavior, config);
+            Map(Politeness, config);
+            Map(Authorization, config);
 
             foreach (ExtensionValueElement element in ExtensionValues)
                 config.ConfigurationExtensions.Add(element.Key, element.Value);
 
             return config;
+        }
+
+        private void Map(CrawlBehaviorElement src, CrawlConfiguration dest)
+        {
+            dest.MaxConcurrentThreads = src.MaxConcurrentThreads;
+            dest.MaxPagesToCrawl = src.MaxPagesToCrawl;
+            dest.MaxPagesToCrawlPerDomain = src.MaxPagesToCrawlPerDomain;
+            dest.MaxPageSizeInBytes = src.MaxPageSizeInBytes;
+            dest.UserAgentString = src.UserAgentString;
+            dest.HttpProtocolVersion = GetHttpProtocolVersion(src);
+            dest.CrawlTimeoutSeconds = src.CrawlTimeoutSeconds;
+            dest.IsUriRecrawlingEnabled = src.IsUriRecrawlingEnabled;
+            dest.IsExternalPageCrawlingEnabled = src.IsExternalPageCrawlingEnabled;
+            dest.IsExternalPageLinksCrawlingEnabled = src.IsExternalPageLinksCrawlingEnabled;
+            dest.IsRespectUrlNamedAnchorOrHashbangEnabled = src.IsRespectUrlNamedAnchorOrHashbangEnabled;
+            dest.DownloadableContentTypes = src.DownloadableContentTypes;
+            dest.HttpServicePointConnectionLimit = src.HttpServicePointConnectionLimit;
+            dest.HttpRequestTimeoutInSeconds = src.HttpRequestTimeoutInSeconds;
+            dest.HttpRequestMaxAutoRedirects = src.HttpRequestMaxAutoRedirects;
+            dest.IsHttpRequestAutoRedirectsEnabled = src.IsHttpRequestAutoRedirectsEnabled;
+            dest.IsHttpRequestAutomaticDecompressionEnabled = src.IsHttpRequestAutomaticDecompressionEnabled;
+            dest.IsSendingCookiesEnabled = src.IsSendingCookiesEnabled;
+            dest.IsSslCertificateValidationEnabled = src.IsSslCertificateValidationEnabled;
+            dest.MinAvailableMemoryRequiredInMb = src.MinAvailableMemoryRequiredInMb;
+            dest.MaxMemoryUsageInMb = src.MaxMemoryUsageInMb;
+            dest.MaxMemoryUsageCacheTimeInSeconds = src.MaxMemoryUsageCacheTimeInSeconds;
+            dest.MaxCrawlDepth = src.MaxCrawlDepth;
+            dest.MaxLinksPerPage = src.MaxLinksPerPage;
+            dest.IsForcedLinkParsingEnabled = src.IsForcedLinkParsingEnabled;
+            dest.MaxRetryCount = src.MaxRetryCount;
+            dest.MinRetryDelayInMilliseconds = src.MinRetryDelayInMilliseconds;
+        }
+
+        private void Map(PolitenessElement src, CrawlConfiguration dest)
+        {
+            dest.IsRespectRobotsDotTextEnabled = src.IsRespectRobotsDotTextEnabled;
+            dest.IsRespectMetaRobotsNoFollowEnabled = src.IsRespectMetaRobotsNoFollowEnabled;
+            dest.IsRespectHttpXRobotsTagHeaderNoFollowEnabled = src.IsRespectHttpXRobotsTagHeaderNoFollowEnabled;
+            dest.IsRespectAnchorRelNoFollowEnabled = src.IsRespectAnchorRelNoFollowEnabled;
+            dest.IsIgnoreRobotsDotTextIfRootDisallowedEnabled = src.IsIgnoreRobotsDotTextIfRootDisallowedEnabled;
+            dest.RobotsDotTextUserAgentString = src.RobotsDotTextUserAgentString;
+            dest.MinCrawlDelayPerDomainMilliSeconds = src.MinCrawlDelayPerDomainMilliSeconds;
+            dest.MaxRobotsDotTextCrawlDelayInSeconds = src.MaxRobotsDotTextCrawlDelayInSeconds;
+        }
+
+        private void Map(AuthorizationElement src, CrawlConfiguration dest)
+        {
+            dest.IsAlwaysLogin = src.IsAlwaysLogin;
+            dest.LoginUser = src.LoginUser;
+            dest.LoginPassword = src.LoginPassword;
+            dest.UseDefaultCredentials = src.UseDefaultCredentials;
+        }
+
+        private HttpProtocolVersion GetHttpProtocolVersion(CrawlBehaviorElement src)
+        {
+
+            switch (src.HttpProtocolVersion)
+            {
+                case "1.0":
+                    return HttpProtocolVersion.Version10;
+                case "1.1":
+                    return HttpProtocolVersion.Version11;
+                default:
+                    return HttpProtocolVersion.NotSpecified;
+            }
         }
 
         public static AbotConfigurationSectionHandler LoadFromXml()
@@ -90,6 +151,15 @@ namespace Abot.Core
         {
             get { return (string)this["loginPassword"]; }
         }
+
+        /// <summary>
+        /// Specifies whether to use default credentials. 
+        /// </summary>
+        [ConfigurationProperty("useDefaultCredentials", IsRequired = false)]
+        public bool UseDefaultCredentials
+        {
+            get { return (bool)this["useDefaultCredentials"]; }
+        }
     }
     [Serializable]
     public class PolitenessElement : ConfigurationElement
@@ -104,6 +174,12 @@ namespace Abot.Core
         public bool IsRespectMetaRobotsNoFollowEnabled
         {
             get { return (bool)this["isRespectMetaRobotsNoFollowEnabled"]; }
+        }
+
+        [ConfigurationProperty("isRespectHttpXRobotsTagHeaderNoFollowEnabled", IsRequired = false)]
+        public bool IsRespectHttpXRobotsTagHeaderNoFollowEnabled
+        {
+            get { return (bool)this["isRespectHttpXRobotsTagHeaderNoFollowEnabled"]; }
         }
 
         [ConfigurationProperty("isRespectAnchorRelNoFollowEnabled", IsRequired = false)]
@@ -168,6 +244,12 @@ namespace Abot.Core
         public string UserAgentString
         {
             get { return (string)this["userAgentString"]; }
+        }
+
+        [ConfigurationProperty("httpProtocolVersion", IsRequired = false)]
+        public string HttpProtocolVersion
+        {
+            get{ return (string)this["httpProtocolVersion"]; }
         }
 
         [ConfigurationProperty("crawlTimeoutSeconds", IsRequired = false)]
@@ -270,6 +352,12 @@ namespace Abot.Core
         public int MaxCrawlDepth
         {
             get { return (int)this["maxCrawlDepth"]; }
+        }
+
+        [ConfigurationProperty("maxLinksPerPage", IsRequired = false, DefaultValue = 0)]
+        public int MaxLinksPerPage
+        {
+            get { return (int)this["maxLinksPerPage"]; }
         }
 
         [ConfigurationProperty("isForcedLinkParsingEnabled", IsRequired = false)]

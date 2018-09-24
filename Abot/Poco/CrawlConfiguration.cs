@@ -31,8 +31,8 @@ namespace Abot.Poco
         public int MaxConcurrentThreads { get; set; }
 
         /// <summary>
-        /// Maximum number of pages to crawl.
-        /// This value is required.
+        /// Maximum number of pages to crawl. 
+        /// If zero, this setting has no effect
         /// </summary>
         public int MaxPagesToCrawl { get; set; }
 
@@ -49,16 +49,14 @@ namespace Abot.Poco
         public int MaxPageSizeInBytes { get; set; }
 
         /// <summary>
-        /// The maximum numer of seconds to respect in the robots.txt "Crawl-delay: X" directive. 
-        /// IsRespectRobotsDotTextEnabled must be true for this value to be used.
-        /// If zero, will use whatever the robots.txt crawl delay requests no matter how high the value is.
-        /// </summary>
-        public int MaxRobotsDotTextCrawlDelayInSeconds { get; set; }
-
-        /// <summary>
         /// The user agent string to use for http requests
         /// </summary>
         public string UserAgentString { get; set; }
+
+        /// <summary>
+        /// The http protocol version number to use during http requests. Currently supporting values "1.1" and "1.0". 
+        /// </summary>
+        public HttpProtocolVersion HttpProtocolVersion { get; set; }
 
         /// <summary>
         /// Maximum seconds before the crawl times out and stops. 
@@ -103,7 +101,7 @@ namespace Abot.Poco
         public int HttpServicePointConnectionLimit { get; set; }
 
         /// <summary>
-        /// Gets or sets the time-out value in milliseconds for the System.Net.HttpWebRequest.GetResponse() and System.Net.HttpWebRequest.GetRequestStream() methods.
+        /// Gets or sets the time-out value in seconds for the System.Net.HttpWebRequest.GetResponse() and System.Net.HttpWebRequest.GetRequestStream() methods.
         /// If zero, this setting has no effect.
         /// </summary>
         public int HttpRequestTimeoutInSeconds { get; set; }
@@ -161,6 +159,12 @@ namespace Abot.Poco
         public int MaxCrawlDepth { get; set; }
 
         /// <summary>
+        /// Maximum links to crawl per page.
+        /// If value is zero, this setting has no effect.
+        /// </summary>
+        public int MaxLinksPerPage { get; set; }
+
+        /// <summary>
         /// Gets or sets a value that indicates whether the crawler should parse the page's links even if a CrawlDecision (like CrawlDecisionMaker.ShouldCrawlPageLinks()) determines that those links will not be crawled.
         /// </summary>
         public bool IsForcedLinkParsingEnabled { get; set; }
@@ -190,6 +194,11 @@ namespace Abot.Poco
         public bool IsRespectMetaRobotsNoFollowEnabled { get; set; }
 
         /// <summary>
+        /// Whether the crawler should ignore links on pages that have an http X-Robots-Tag header of nofollow
+        /// </summary>
+        public bool IsRespectHttpXRobotsTagHeaderNoFollowEnabled { get; set; }
+
+        /// <summary>
         /// Whether the crawler should ignore links that have a <a href="whatever" rel="nofollow">...
         /// </summary>
         public bool IsRespectAnchorRelNoFollowEnabled { get; set; }
@@ -209,6 +218,13 @@ namespace Abot.Poco
         /// </summary>
         public int MinCrawlDelayPerDomainMilliSeconds { get; set; }
 
+        /// <summary>
+        /// The maximum numer of seconds to respect in the robots.txt "Crawl-delay: X" directive. 
+        /// IsRespectRobotsDotTextEnabled must be true for this value to be used.
+        /// If zero, will use whatever the robots.txt crawl delay requests no matter how high the value is.
+        /// </summary>
+        public int MaxRobotsDotTextCrawlDelayInSeconds { get; set; }
+
         #endregion
 
         #region Authorization
@@ -225,6 +241,11 @@ namespace Abot.Poco
         /// The password to be used for autorization 
         /// </summary>
         public string LoginPassword { get; set; }
+
+        /// <summary>
+        /// Specifies whether to use default credentials.
+        /// </summary>
+        public bool UseDefaultCredentials { get; set; }
 
         #endregion
     }

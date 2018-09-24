@@ -12,34 +12,20 @@ namespace Abot.Core
     [Serializable]
     public class HapHyperLinkParser : HyperLinkParser
     {
-        Func<string, string> _cleanURLFunc;
-        bool _isRespectAnchorRelNoFollowEnabled;
-
         protected override string ParserType
         {
             get { return "HtmlAgilityPack"; }
         }
 
         public HapHyperLinkParser()
-            :this(false, false)
+            :base()
         {
         }
 
-        /// <summary>
-        /// Constructor
-        /// </summary>
-        /// <param name="isRespectMetaRobotsNoFollowEnabled">Whether parser should ignore pages with meta no robots</param>
-        /// <param name="isRespectAnchorRelNoFollowEnabled">Whether parser should ignore links with rel no follow</param>
-        /// <param name="cleanURLFunc">Function to clean the url</param>
-        /// <param name="isRespectUrlNamedAnchorOrHashbangEnabled">Whether parser should consider named anchor and/or hashbang '#' character as part of the url</param>
-        public HapHyperLinkParser(bool isRespectMetaRobotsNoFollowEnabled,
-                                  bool isRespectAnchorRelNoFollowEnabled,
-                                  Func<string, string> cleanURLFunc = null,
-                                  bool isRespectUrlNamedAnchorOrHashbangEnabled = false)
-            :base(isRespectMetaRobotsNoFollowEnabled, isRespectUrlNamedAnchorOrHashbangEnabled)
+        public HapHyperLinkParser(CrawlConfiguration config, Func<string, string> cleanURLFunc)
+            : base(config, cleanURLFunc)
         {
-            _isRespectAnchorRelNoFollowEnabled = isRespectAnchorRelNoFollowEnabled;
-            _cleanURLFunc = cleanURLFunc;
+            
         }
 
         protected override IEnumerable<string> GetHrefValues(CrawledPage crawledPage)
@@ -94,7 +80,7 @@ namespace Abot.Core
                 if (HasRelNoFollow(node))
                     continue;
 
-                hrefValue = _cleanURLFunc != null ? _cleanURLFunc(node.Attributes["href"].Value) : node.Attributes["href"].Value;
+                hrefValue = node.Attributes["href"].Value;
                 if (!string.IsNullOrWhiteSpace(hrefValue))
                 {
                     hrefValue = DeEntitize(hrefValue);
@@ -124,7 +110,7 @@ namespace Abot.Core
         protected virtual bool HasRelNoFollow(HtmlNode node)
         {
             HtmlAttribute attr = node.Attributes["rel"];
-            return _isRespectAnchorRelNoFollowEnabled && (attr != null && attr.Value.ToLower().Trim() == "nofollow");
+            return _config.IsRespectAnchorRelNoFollowEnabled && (attr != null && attr.Value.ToLower().Trim() == "nofollow");
         }
     }
 }

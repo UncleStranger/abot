@@ -1,12 +1,7 @@
-﻿using Abot.Poco;
+using Abot.Poco;
 using log4net;
 using System;
-using System.CodeDom;
-using System.Linq;
 using System.Net;
-using System.Reflection;
-using System.Threading.Tasks;
-using log4net.Core;
 
 namespace Abot.Core
 {
@@ -209,6 +204,7 @@ namespace Abot.Core
             request.AllowAutoRedirect = _config.IsHttpRequestAutoRedirectsEnabled;
             request.UserAgent = _config.UserAgentString;
             request.Accept = "*/*";
+            request.ProtocolVersion = GetEquivalentHttpProtocolVersion();
 
             if (_config.HttpRequestMaxAutoRedirects > 0)
                 request.MaximumAutomaticRedirections = _config.HttpRequestMaxAutoRedirects;
@@ -222,13 +218,32 @@ namespace Abot.Core
             if (_config.IsSendingCookiesEnabled)
                 request.CookieContainer = _cookieContainer;
 
+            //Supposedly this does not work... https://github.com/sjdirect/abot/issues/122
+            //if (_config.IsAlwaysLogin)
+            //{
+            //    request.Credentials = new NetworkCredential(_config.LoginUser, _config.LoginPassword);
+            //    request.UseDefaultCredentials = false;
+            //}
             if (_config.IsAlwaysLogin)
             {
-                request.Credentials = new NetworkCredential(_config.LoginUser, _config.LoginPassword);
-                request.UseDefaultCredentials = false;
+                string credentials = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes(_config.LoginUser + ":" + _config.LoginPassword));
+                request.Headers[HttpRequestHeader.Authorization] = "Basic " + credentials;
+            }
+
+            if (_config.UseDefaultCredentials)
+            {
+                request.UseDefaultCredentials = true;
             }
 
             return request;
+        }
+
+        private Version GetEquivalentHttpProtocolVersion()
+        {
+            if (_config.HttpProtocolVersion == Abot.Poco.HttpProtocolVersion.Version10)
+                return HttpVersion.Version10;
+
+            return HttpVersion.Version11;
         }
 
         protected virtual void ProcessResponseObject(HttpWebResponse response)
